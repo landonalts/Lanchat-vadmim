@@ -1,0 +1,154 @@
+<!-- ... your full existing HTML above ... -->
+
+<!-- Add this inside your lobbyPage div (right below #playerCount div) -->
+<div id="adminPanel" class="hidden" style="margin-top: 1rem; background: rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 1rem; color: #ffd369;">
+  <h3 style="margin-top: 0;">Admin Panel</h3>
+  <div>
+    <strong>Players in Lobby:</strong>
+    <ul id="adminPlayerList" style="list-style: none; padding-left: 0;"></ul>
+  </div>
+  <div style="margin-top: 1rem;">
+    <input type="text" id="adminAnnouncementInput" placeholder="Type announcement..." maxlength="200" style="width: 100%; padding: 0.5rem; border-radius: 8px; border: none; font-weight: 600;"/>
+    <button id="sendAnnouncementBtn" style="margin-top: 0.5rem; width: 100%; background: #ffd369; color: #2d2d2d; border: none; border-radius: 12px; font-weight: 700; cursor: pointer;">Send Announcement</button>
+  </div>
+</div>
+
+<script>
+  // Insert these new variables
+  const adminPanel = document.getElementById('adminPanel');
+  const adminPlayerList = document.getElementById('adminPlayerList');
+  const adminAnnouncementInput = document.getElementById('adminAnnouncementInput');
+  const sendAnnouncementBtn = document.getElementById('sendAnnouncementBtn');
+
+  // Your admin username (change if needed)
+  const ADMIN_USERNAME = 'admin';
+
+  // After joinLobby sets currentLobby and shows lobbyPage, check admin
+  async function joinLobby(code) {
+    const lobbyRef = db.collection('lobbies').doc(code);
+    const doc = await lobbyRef.get();
+    if (!doc.exists) {
+      alert('Lobby not found.');
+      return;
+    }
+
+    currentLobby = code;
+    showPage(lobbyPage);
+    lobbyCodeDisplay.textContent = code;
+
+    const playerKey = username;
+
+    await db.runTransaction(async (transaction) => {
+      const lobbyDoc = await transaction.get(lobbyRef);
+      if (!lobbyDoc.exists) throw "Lobby does not exist!";
+      const players = lobbyDoc.data().players || {};
+      players[playerKey] = true;
+      transaction.update(lobbyRef, { players });
+    });
+
+    // Show or hide admin panel based on username
+    if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+      adminPanel.classList.remove('hidden');
+      setupAdminPanel(lobbyRef);
+    } else {
+      adminPanel.classList.add('hidden');
+    }
+
+    // Listen for players count update and update admin list if admin
+    lobbyPlayersUnsub = lobbyRef.onSnapshot(snapshot => {
+      const data = snapshot.data();
+      const players = data?.players || {};
+      const count = Object.keys(players).length;
+      playerCountDisplay.textContent = `Players: ${count}`;
+
+      if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+        updateAdminPlayerList(players, lobbyRef);
+      }
+    });
+
+    // Listen for lobby chat messages
+    lobbyMessagesUnsub = lobbyRef.collection('messages').orderBy('timestamp')
+      .onSnapshot(snapshot => {
+        if (currentChat !== 'lobby') return;
+        messagesDiv.innerHTML = '';
+        snapshot.forEach(doc => {
+          const msg = doc.data();
+          addMessage(messagesDiv, msg);
+        });
+        scrollMessagesToBottom(messagesDiv);
+      });
+
+    setActiveChatTab('lobby');
+  }
+
+  // Update admin player list with kick buttons
+  function updateAdminPlayerList(players, lobbyRef) {
+    adminPlayerList.innerHTML = '';
+    Object.keys(players).forEach(player => {
+      const li = document.createElement('li');
+      li.textContent = player;
+
+      if (player.toLowerCase() !== ADMIN_USERNAME.toLowerCase()) {
+        const kickBtn = document.createElement('button');
+        kickBtn.textContent = 'Kick';
+        kickBtn.style.marginLeft = '1rem';
+        kickBtn.style.background = '#e53e3e';
+        kickBtn.style.color = 'white';
+        kickBtn.style.border = 'none';
+        kickBtn.style.borderRadius = '8px';
+        kickBtn.style.cursor = 'pointer';
+        kickBtn.style.fontWeight = '700';
+        kickBtn.onclick = async () => {
+          if (confirm(`Kick player "${player}" from lobby?`)) {
+            await db.runTransaction(async (transaction) => {
+              const lobbyDoc = await transaction.get(lobbyRef);
+              if (!lobbyDoc.exists) return;
+              const currentPlayers = lobbyDoc.data().players || {};
+              delete currentPlayers[player];
+              transaction.update(lobbyRef, { players: currentPlayers });
+            });
+          }
+        };
+        li.appendChild(kickBtn);
+      }
+
+      adminPlayerList.appendChild(li);
+    });
+  }
+
+  // Setup admin panel event for announcements
+  function setupAdminPanel(lobbyRef) {
+    sendAnnouncementBtn.onclick = async () => {
+      const announcement = adminAnnouncementInput.value.trim();
+      if (!announcement) return;
+      adminAnnouncementInput.value = '';
+
+      // Add announcement message to lobby chat, tagged as from 'ADMIN'
+      await lobbyRef.collection('messages').add({
+        username: 'ADMIN',
+        text: announcement,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        isAnnouncement: true,
+      });
+    };
+  }
+
+  // Modify addMessage to highlight admin announcements
+  function addMessage(container, msg) {
+    const div = document.createElement('div');
+    div.className = 'message';
+    if (msg.username === username) div.classList.add('self');
+
+    // Highlight admin announcements differently
+    if (msg.username === 'ADMIN' && msg.isAnnouncement) {
+      div.style.background = '#ffb800';
+      div.style.color = '#2d2d2d';
+      div.style.fontWeight = '700';
+      div.textContent = `[Announcement] ${msg.text}`;
+    } else {
+      div.textContent = `${msg.username}: ${msg.text}`;
+    }
+
+    container.appendChild(div);
+  }
+</script>
