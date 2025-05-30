@@ -1,0 +1,197 @@
+<!-- Add this inside your #app div, just before closing it -->
+
+<button id="adminBtn" style="margin-top:1rem; background:#444; border:none; border-radius:12px; padding:0.75rem; font-weight:700; color:#ffd369; cursor:pointer; width:100%;">Admin</button>
+
+<!-- Admin Panel Modal -->
+<div id="adminPanel" class="hidden" style="
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.85);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 320px;
+  box-shadow: 0 8px 24px rgba(255, 211, 105, 0.8);
+  z-index: 1000;
+  color: #ffd369;
+">
+  <h2 style="text-align:center; margin-bottom:1rem;">Admin Panel</h2>
+  <label for="banUsername">Username to Ban:</label>
+  <input type="text" id="banUsername" placeholder="Username" maxlength="20" autocomplete="off" style="width:100%; margin-bottom:1rem; border-radius: 8px; padding: 0.5rem; border: none; font-weight: 600;"/>
+  
+  <label for="banDuration">Ban Duration (minutes):</label>
+  <input type="number" id="banDuration" placeholder="Minutes" min="1" style="width:100%; margin-bottom:1.5rem; border-radius: 8px; padding: 0.5rem; border: none; font-weight: 600;" />
+  
+  <button id="banUserBtn" style="background:#ffd369; color:#2d2d2d; width:100%; border:none; border-radius: 12px; padding:0.75rem; font-weight:700; cursor:pointer;">Ban User</button>
+  <button id="closeAdminPanelBtn" style="margin-top:1rem; background:#e53e3e; color:#fff; width:100%; border:none; border-radius: 12px; padding:0.75rem; font-weight:700; cursor:pointer;">Close</button>
+</div>
+
+<!-- Password Prompt Modal -->
+<div id="passwordPrompt" class="hidden" style="
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.85);
+  border-radius: 16px;
+  padding: 2rem;
+  width: 280px;
+  box-shadow: 0 8px 24px rgba(255, 211, 105, 0.8);
+  z-index: 1000;
+  color: #ffd369;
+  text-align: center;
+">
+  <h3>Enter Admin Password</h3>
+  <input type="password" id="adminPasswordInput" placeholder="Password" style="width:100%; margin:1rem 0; border-radius:8px; padding:0.5rem; border:none; font-weight:600;" autocomplete="off" />
+  <button id="submitAdminPassword" style="background:#ffd369; color:#2d2d2d; width:100%; border:none; border-radius: 12px; padding:0.75rem; font-weight:700; cursor:pointer;">Submit</button>
+  <button id="cancelAdminPassword" style="margin-top:1rem; background:#e53e3e; color:#fff; width:100%; border:none; border-radius: 12px; padding:0.75rem; font-weight:700; cursor:pointer;">Cancel</button>
+</div>
+
+<script>
+  // --- Admin panel variables ---
+  const adminBtn = document.getElementById('adminBtn');
+  const adminPanel = document.getElementById('adminPanel');
+  const passwordPrompt = document.getElementById('passwordPrompt');
+  const adminPasswordInput = document.getElementById('adminPasswordInput');
+  const submitAdminPassword = document.getElementById('submitAdminPassword');
+  const cancelAdminPassword = document.getElementById('cancelAdminPassword');
+  const closeAdminPanelBtn = document.getElementById('closeAdminPanelBtn');
+
+  const banUsernameInput = document.getElementById('banUsername');
+  const banDurationInput = document.getElementById('banDuration');
+  const banUserBtn = document.getElementById('banUserBtn');
+
+  // Admin password constant
+  const ADMIN_PASSWORD = 'landon090711';
+
+  // Show password prompt on admin button click
+  adminBtn.addEventListener('click', () => {
+    adminPasswordInput.value = '';
+    passwordPrompt.classList.remove('hidden');
+  });
+
+  // Cancel password prompt
+  cancelAdminPassword.addEventListener('click', () => {
+    passwordPrompt.classList.add('hidden');
+  });
+
+  // Submit password
+  submitAdminPassword.addEventListener('click', () => {
+    const entered = adminPasswordInput.value.trim();
+    if (entered === ADMIN_PASSWORD) {
+      passwordPrompt.classList.add('hidden');
+      openAdminPanel();
+    } else {
+      alert('Incorrect password.');
+      adminPasswordInput.value = '';
+    }
+  });
+
+  // Open admin panel
+  function openAdminPanel() {
+    banUsernameInput.value = '';
+    banDurationInput.value = '';
+    adminPanel.classList.remove('hidden');
+  }
+
+  // Close admin panel
+  closeAdminPanelBtn.addEventListener('click', () => {
+    adminPanel.classList.add('hidden');
+  });
+
+  // Ban user logic
+  banUserBtn.addEventListener('click', async () => {
+    const banUser = banUsernameInput.value.trim();
+    const banMinutes = parseInt(banDurationInput.value.trim(), 10);
+
+    if (!banUser) {
+      alert('Please enter a username to ban.');
+      return;
+    }
+    if (!banMinutes || banMinutes < 1) {
+      alert('Please enter a valid ban duration in minutes.');
+      return;
+    }
+
+    // Calculate ban expiry timestamp (in millis)
+    const banExpiresAt = Date.now() + banMinutes * 60 * 1000;
+
+    try {
+      // Save ban info to Firestore in 'bans' collection keyed by username (lowercase for consistency)
+      await db.collection('bans').doc(banUser.toLowerCase()).set({
+        username: banUser,
+        bannedUntil: banExpiresAt,
+        bannedBy: username, // current admin username
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      alert(`${banUser} has been banned for ${banMinutes} minutes.`);
+      banUsernameInput.value = '';
+      banDurationInput.value = '';
+      adminPanel.classList.add('hidden');
+    } catch (error) {
+      console.error('Error banning user:', error);
+      alert('Failed to ban user, please try again.');
+    }
+  });
+
+  // --- Modify message sending to block banned users ---
+
+  // Helper: Check if user is banned before sending message
+  async function isUserBanned(userToCheck) {
+    const doc = await db.collection('bans').doc(userToCheck.toLowerCase()).get();
+    if (!doc.exists) return false;
+    const data = doc.data();
+    if (data.bannedUntil && data.bannedUntil.toMillis) {
+      // Firestore timestamp object
+      if (data.bannedUntil.toMillis() > Date.now()) return true;
+    } else if (data.bannedUntil > Date.now()) {
+      return true;
+    }
+    return false;
+  }
+
+  // Wrap your existing send message functions to check bans:
+
+  // Lobby send message with ban check
+  sendMessageBtn.onclick = async () => {
+    const text = chatMessageInput.value.trim();
+    if (!text || !currentLobby) return;
+
+    const banned = await isUserBanned(username);
+    if (banned) {
+      alert('You are banned from sending messages.');
+      return;
+    }
+
+    chatMessageInput.value = '';
+
+    const lobbyRef = db.collection('lobbies').doc(currentLobby);
+    await lobbyRef.collection('messages').add({
+      username,
+      text,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  };
+
+  // Global send message with ban check
+  sendGlobalMessageBtn.onclick = async () => {
+    const text = globalChatMessageInput.value.trim();
+    if (!text) return;
+
+    const banned = await isUserBanned(username);
+    if (banned) {
+      alert('You are banned from sending messages.');
+      return;
+    }
+
+    globalChatMessageInput.value = '';
+
+    await db.collection('globalMessages').add({
+      username,
+      text,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  };
+</script>
